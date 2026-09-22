@@ -1,27 +1,58 @@
 package main
 
 import (
+	"flag"
 	"fmt"
 	"math/rand"
 	"os"
 	"os/signal"
 	"syscall"
 	"time"
+
+	"golang.org/x/term"
 )
 
 const (
-	width  = 80
-	height = 40
-	alive  = "█"
-	dead   = " "
+	alive = "█"
+	dead  = " "
 )
 
+// Mapeo de colores ANSI
+var colors = map[string]string{
+	"green":   "\033[32m",
+	"red":     "\033[31m",
+	"blue":    "\033[34m",
+	"magenta": "\033[35m",
+	"cyan":    "\033[36m",
+	"white":   "\033[37m",
+}
+
+const resetColor = "\033[0m"
+
 func main() {
-	// Capturar Ctrl+C para restaurar el cursor antes de salir
+	// 1. Configuración de Flags
+	colorFlag := flag.String("color", "green", "Define el color de las células (green, red, blue, magenta, cyan, white)")
+	flag.Parse()
+
+	selectedColor, exists := colors[*colorFlag]
+	if !exists {
+		selectedColor = colors["green"] // Fallback si escriben un color que no existe
+	}
+
+	// 2. Obtener el tamaño dinámico de la terminal
+	fd := int(os.Stdout.Fd())
+	width, height, err := term.GetSize(fd)
+	if err != nil {
+		width, height = 80, 24 // Tamaño por defecto si falla la lectura
+	}
+	height-- // Restamos 1 al alto para evitar que la terminal haga scroll vertical automático
+
+	// Manejo de salida limpia (Ctrl+C)
 	c := make(chan os.Signal, 1)
 	signal.Notify(c, os.Interrupt, syscall.SIGTERM)
 	go func() {
 		<-c
+		fmt.Print(resetColor)
 		fmt.Print("\033[?25h") // Mostrar cursor
 		os.Exit(0)
 	}()
@@ -30,34 +61,35 @@ func main() {
 	fmt.Print("\033[2J")   // Limpiar pantalla
 	defer fmt.Print("\033[?25h")
 
-	grid := initGrid()
+	// 3. Generador de números aleatorios con semilla basada en el tiempo actual
+	rng := rand.New(rand.NewSource(time.Now().UnixNano()))
+
+	grid := initGrid(width, height, rng)
 
 	for {
-		fmt.Print("\033[H") // Mover cursor a la posición inicial (arriba a la izquierda)
-		drawGrid(grid)
-		grid = nextGeneration(grid)
-		time.Sleep(80 * time.Millisecond) // Velocidad de la animación
+		fmt.Print("\033[H") // Mover cursor al inicio
+		drawGrid(grid, selectedColor)
+		grid = nextGeneration(grid, width, height)
+		time.Sleep(80 * time.Millisecond)
 	}
 }
 
-func initGrid() [][]bool {
+func initGrid(width, height int, rng *rand.Rand) [][]bool {
 	grid := make([][]bool, height)
 	for i := range grid {
 		grid[i] = make([]bool, width)
 		for j := range grid[i] {
-			// 20% de probabilidad de que una célula nazca viva
-			grid[i][j] = rand.Float32() < 0.20
+			grid[i][j] = rng.Float32() < 0.20 // 20% de probabilidad
 		}
 	}
 	return grid
 }
 
-func drawGrid(grid [][]bool) {
-	var output string
+func drawGrid(grid [][]bool, colorCode string) {
+	output := colorCode // Iniciamos el string con el color seleccionado
 	for _, row := range grid {
 		for _, cell := range row {
 			if cell {
-				// Puedes añadir colores ANSI aquí, por ejemplo verde: "\033[32m█\033[0m"
 				output += alive
 			} else {
 				output += dead
@@ -68,18 +100,16 @@ func drawGrid(grid [][]bool) {
 	fmt.Print(output)
 }
 
-func nextGeneration(grid [][]bool) [][]bool {
+func nextGeneration(grid [][]bool, width, height int) [][]bool {
 	next := make([][]bool, height)
 	for i := range grid {
 		next[i] = make([]bool, width)
 		for j := range grid[i] {
-			neighbors := countNeighbors(grid, i, j)
+			neighbors := countNeighbors(grid, i, j, width, height)
 
 			if grid[i][j] {
-				// Reglas 1, 2 y 3: Sobrevive si tiene 2 o 3 vecinos
 				next[i][j] = neighbors == 2 || neighbors == 3
 			} else {
-				// Regla 4: Reproducción
 				next[i][j] = neighbors == 3
 			}
 		}
@@ -87,9 +117,8 @@ func nextGeneration(grid [][]bool) [][]bool {
 	return next
 }
 
-func countNeighbors(grid [][]bool, x, y int) int {
+func countNeighbors(grid [][]bool, x, y, width, height int) int {
 	count := 0
-	// Revisar los 8 vecinos (incluso en los bordes usando módulo para un efecto de mapa infinito o toroide)
 	for i := -1; i <= 1; i++ {
 		for j := -1; j <= 1; j++ {
 			if i == 0 && j == 0 {
