@@ -17,7 +17,6 @@ const (
 	dead  = " "
 )
 
-// Mapeo de colores ANSI
 var colors = map[string]string{
 	"green":   "\033[32m",
 	"red":     "\033[31m",
@@ -30,47 +29,45 @@ var colors = map[string]string{
 const resetColor = "\033[0m"
 
 func main() {
-	// 1. Configuración de Flags
-	colorFlag := flag.String("color", "green", "Define el color de las células (green, red, blue, magenta, cyan, white)")
+	// Flags actualizadas
+	colorFlag := flag.String("color", "white", "Define el color de las células (green, red, blue, magenta, cyan, white)")
+	delayFlag := flag.Duration("delay", 80*time.Millisecond, "Tiempo de espera entre cada generación (ej. 100ms, 0.5s)")
 	flag.Parse()
 
 	selectedColor, exists := colors[*colorFlag]
 	if !exists {
-		selectedColor = colors["green"] // Fallback si escriben un color que no existe
+		selectedColor = colors["white"] // Fallback al nuevo default
 	}
 
-	// 2. Obtener el tamaño dinámico de la terminal
 	fd := int(os.Stdout.Fd())
 	width, height, err := term.GetSize(fd)
 	if err != nil {
-		width, height = 80, 24 // Tamaño por defecto si falla la lectura
+		width, height = 80, 24
 	}
-	height-- // Restamos 1 al alto para evitar que la terminal haga scroll vertical automático
+	height--
 
-	// Manejo de salida limpia (Ctrl+C)
 	c := make(chan os.Signal, 1)
 	signal.Notify(c, os.Interrupt, syscall.SIGTERM)
 	go func() {
 		<-c
 		fmt.Print(resetColor)
-		fmt.Print("\033[?25h") // Mostrar cursor
+		fmt.Print("\033[?25h")
 		os.Exit(0)
 	}()
 
-	fmt.Print("\033[?25l") // Ocultar cursor
-	fmt.Print("\033[2J")   // Limpiar pantalla
+	fmt.Print("\033[?25l")
+	fmt.Print("\033[2J")
 	defer fmt.Print("\033[?25h")
 
-	// 3. Generador de números aleatorios con semilla basada en el tiempo actual
 	rng := rand.New(rand.NewSource(time.Now().UnixNano()))
-
 	grid := initGrid(width, height, rng)
 
 	for {
-		fmt.Print("\033[H") // Mover cursor al inicio
+		fmt.Print("\033[H")
 		drawGrid(grid, selectedColor)
 		grid = nextGeneration(grid, width, height)
-		time.Sleep(80 * time.Millisecond)
+		// Usamos el valor de la flag de duración directamente
+		time.Sleep(*delayFlag)
 	}
 }
 
@@ -79,14 +76,14 @@ func initGrid(width, height int, rng *rand.Rand) [][]bool {
 	for i := range grid {
 		grid[i] = make([]bool, width)
 		for j := range grid[i] {
-			grid[i][j] = rng.Float32() < 0.20 // 20% de probabilidad
+			grid[i][j] = rng.Float32() < 0.20
 		}
 	}
 	return grid
 }
 
 func drawGrid(grid [][]bool, colorCode string) {
-	output := colorCode // Iniciamos el string con el color seleccionado
+	output := colorCode
 	for _, row := range grid {
 		for _, cell := range row {
 			if cell {
